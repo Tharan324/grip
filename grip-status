@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+import os
+import sys
+import helpers
+
+if os.path.exists('.grip') is False:
+        print('grip-status: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+
+if len(sys.argv) != 1:
+        print("usage: grip-status", file=sys.stderr)
+        sys.exit(1)
+
+
+with open('.grip/HEAD', 'r') as head:
+        branch_path = head.read().strip()
+
+with open(f'{branch_path}/ref', 'r') as ref:
+        latest_commit_path = ref.read().strip()
+
+
+files_in_cwd = [file for file in os.listdir('.') if os.path.isfile(file)]
+files_in_index = os.listdir('.grip/INDEX')
+files_in_repo = os.listdir(latest_commit_path)
+if 'PARENT' in files_in_repo:
+        files_in_repo.remove('PARENT')
+files_in_repo.remove('MESSAGE')
+
+
+output_data = {}
+
+# Iterate over every file in the current working directory
+for file in files_in_cwd:
+        # If file is untracked
+        if file not in files_in_index and file not in files_in_repo:
+                output_data[file] = 'untracked'
+        # If file is staged and changed or staged and uncommitted
+        elif file in files_in_index and file not in files_in_repo:
+                file_in_index = files_in_index[files_in_index.index(file)]
+                file_in_index_path = os.path.join('.grip/INDEX', file_in_index)
+                if helpers.diff(file, file_in_index_path):
+                        output_data[file] = 'added to index'
+                else:
+                        output_data[file] = 'added to index, file changed'
+        # File is comitted, or modifications in staging
+        elif file in files_in_index and file in files_in_repo:
+                file_in_index = files_in_index[files_in_index.index(file)]
+                file_in_index_path = os.path.join('.grip/INDEX', file_in_index)
+                file_in_repo = files_in_repo[files_in_repo.index(file)]
+                file_in_repo_path = os.path.join(latest_commit_path, file_in_repo)
+
+                if helpers.diff(file, file_in_index_path) and helpers.diff(file, file_in_repo_path):
+                        output_data[file] = 'same as repo'
+                elif helpers.diff(file, file_in_index_path) and helpers.diff(file, file_in_repo_path) is False:
+                        output_data[file] = 'file changed, changes staged for commit'
+                elif helpers.diff(file, file_in_index_path) is False and helpers.diff(file, file_in_repo_path):
+                        output_data[file] = 'file changed, different changes staged for commit'
+                elif helpers.diff(file, file_in_index_path) is False and helpers.diff(file_in_index_path, file_in_repo_path):
+                        output_data[file] = 'file changed, changes not staged for commit'
+                elif helpers.diff(file, file_in_index_path) is False and helpers.diff(file, file_in_repo_path) is False:
+                        output_data[file] = 'file changed, different changes staged for commit'
+        elif file not in files_in_index and file in files_in_repo:
+                output_data[file] = 'deleted from index'
+
+# Check for deletion of the file from the cwd or index
+for file in files_in_index:
+        if file not in files_in_cwd and file in files_in_repo:
+                file_in_index = files_in_index[files_in_index.index(file)]
+                file_in_index_path = os.path.join('.grip/INDEX', file_in_index)
+                file_in_repo = files_in_repo[files_in_repo.index(file)]
+                file_in_repo_path = os.path.join(latest_commit_path, file_in_repo)
+
+                if helpers.diff(file_in_index_path, file_in_repo_path):
+                        output_data[file] = 'file deleted'
+                else:
+                        output_data[file] = 'file deleted, changes staged for commit'
+        elif file not in files_in_cwd and file not in files_in_repo:
+                output_data[file] = 'added to index, file deleted'
+
+# Check for deletion of file from repository
+for file in files_in_repo:
+        if file not in files_in_cwd and file not in files_in_index:
+                output_data[file] = 'file deleted, deleted from index'
+
+# Printing the status in ascending order of file names
+sorted_output_data = {file: output_data[file] for file in sorted(output_data)}
+for file, message in sorted_output_data.items():
+        print(f'{file} - {message}')

@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+if os.path.exists('.grip') is False:
+        print('grip-log: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+# read branch pointer
+with open('.grip/HEAD', 'r') as branch:
+        branch_path = branch.read().strip()
+
+# get latest commit
+with open(f'{branch_path}/ref', 'r') as ref:
+        latest_commit_path = ref.read().strip()
+        if latest_commit_path == '':
+                current_commit = None
+        else:
+                current_commit = latest_commit_path
+
+# iterate backwards through the commit chain
+while current_commit is not None:
+        with open(f'{current_commit}/MESSAGE', 'r') as message:
+                commit_message = message.read().strip()
+        
+        commit_num = os.path.basename(current_commit)
+
+        print(f'{commit_num} {commit_message}')
+
+        if os.path.exists(f'{current_commit}/PARENT'):
+                with open(f'{current_commit}/PARENT', 'r') as parent:
+                        current_commit = parent.read().strip()
+        else:
+                current_commit = None
+                        

@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+import os
+import shutil
+import sys
+import helpers
+import re
+
+if os.path.exists('.grip') is False:
+        print('grip-commit: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+
+# Processing arguments and checking usage
+if len(sys.argv) == 2:
+        if re.search('^-m', sys.argv[1]) is None:
+                print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+                sys.exit(1)
+        else:
+                commit_message = sys.argv[1][2:]
+elif len(sys.argv) == 3:
+        if sys.argv[1] == '-a':
+                if re.match(r'^-m', sys.argv[2]):
+                        commit_message = sys.argv[2][2:]
+                else:
+                        print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+                        sys.exit(1)
+        elif sys.argv[1] == '-m':
+                commit_message = sys.argv[2]
+        else:
+                print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+                sys.exit(1)
+elif len(sys.argv) == 4:
+        if sys.argv[1] != '-a':
+                print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+                sys.exit(1)
+        if sys.argv[2] != '-m':
+                print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+                sys.exit(1)
+        commit_message = sys.argv[3]
+else:
+        print('usage: grip-commit [-a] -m commit-message', file=sys.stderr)
+        sys.exit(1)
+
+with open('.grip/HEAD', 'r') as head:
+        branch_path = head.read().strip()
+
+with open(f'{branch_path}/ref', 'r') as ref:
+        parent_commit_path = ref.read().strip()
+
+if sys.argv[1] == '-a':
+        # Get a parent commit if it exists
+        parent_commit_files = []
+        if parent_commit_path != '':
+                parent_commit_files = os.listdir(parent_commit_path)
+                if 'PARENT' in parent_commit_files:
+                        parent_commit_files.remove('PARENT')
+                parent_commit_files.remove('MESSAGE')
+
+        new_commit_files = []
+        modified_files = []
+        files_to_remove = []
+        # Check for every file in the index
+        # If the file exists in CWD
+        for file in os.listdir('.grip/INDEX'):
+                if (os.path.exists(file)):
+                        # Check if the file has a parent commit
+                        # and the file exists in that commit
+                        if file in parent_commit_files:
+                                # Check if the file contents have changed
+                                # and track the CWD file if its different to parent commit
+                                i = parent_commit_files.index(file)
+                                parent_commit_file = parent_commit_files[i] 
+                                if (helpers.diff(file, os.path.join(parent_commit_path, parent_commit_file)) is False):
+                                        modified_files.append(file)
+                        # Otherwise must be a new file
+                        else:
+                                new_commit_files.append(file)
+                else:
+                        # If there is a parent commit and the file exists in it
+                        # but not in the CWD, must be staged for removal
+                        if parent_commit_path != '':
+                                if file in parent_commit_files:
+                                        files_to_remove.append(file)
+
+        # Do nothing if no changes were found
+        if len(new_commit_files) == 0 and len(modified_files) == 0 and len(files_to_remove) == 0:
+                print('nothing to commit')
+                sys.exit(0)
+
+        # Update the Index to have these files
+        # Any existing files in Index who remained unchanged
+        # should be unaffected
+        for file in modified_files:
+                shutil.copy(file, f'.grip/INDEX/{file}')
+        for file in new_commit_files:
+                shutil.copy(file, f'.grip/INDEX/{file}')
+        for file in files_to_remove:
+                os.remove(f'.grip/INDEX/{file}')
+        
+        helpers.create_commit(parent_commit_path, branch_path, commit_message)
+        sys.exit(0)
+
+# First commit of the trunk/master branch
+# take whatever is in the index and snapshot into commit                      
+if parent_commit_path == '':
+        # nothing to commit if no staged files
+        if len(os.listdir('.grip/INDEX')) == 0:
+                print('nothing to commit')
+                sys.exit(0)
+        
+        helpers.create_commit(parent_commit_path, branch_path, commit_message)
+else:
+        # files from the latest commit
+        parent_commit_files = os.listdir(parent_commit_path)
+        if 'PARENT' in parent_commit_files:
+                parent_commit_files.remove('PARENT')
+        parent_commit_files.remove('MESSAGE')
+
+        new_commit_files = []
+        files_to_remove = []
+
+        # loop over files in the index
+        for file in os.listdir('.grip/INDEX'):
+                # if a file is in the index and latest commit
+                # AND index version is different
+                # then keep the index file
+                # else keep the latest commit's file
+                if file in parent_commit_files:
+                        i = parent_commit_files.index(file)
+                        parent_commit_file = parent_commit_files[i]
+                        if helpers.diff(os.path.join('.grip/INDEX', file), os.path.join(parent_commit_path, parent_commit_file)) is False:
+                                new_commit_files.append(file)
+                # if a file is in the index and not in the latest commit
+                # add it since it must be a new file
+                else:
+                        new_commit_files.append(file)
+
+        # loop over files of previous commits
+        # if a file from the previous commit is missing in the INDEX
+        # it was staged for removal
+        for parent_file in parent_commit_files:
+                if parent_file in os.listdir('.grip/INDEX'):
+                        continue
+                files_to_remove.append(parent_file)
+
+        # if this list is empty
+        # then there were no changes made in this commit attempt
+        if len(new_commit_files) == 0 and len(files_to_remove) == 0:
+                print('nothing to commit')
+                sys.exit(0)
+        
+        helpers.create_commit(parent_commit_path, branch_path, commit_message)

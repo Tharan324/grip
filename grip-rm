@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import os
+import sys
+import re
+import helpers
+        
+if os.path.exists('.grip') is False:
+        print('grip-rm: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+
+# Processing arguments
+if re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', sys.argv[1]):
+        file_start = 1
+        option = None
+        override = False
+        for file in sys.argv[2:]:
+                if re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', file) is None:
+                        print(f"grip-rm: error: invalid filename '{file}'", file=sys.stderr)
+                        sys.exit(1)
+elif sys.argv[1] == '--force' and sys.argv[2] == '--cached':
+        file_start = 3
+        override = True
+        option = sys.argv[2]
+        for file in sys.argv[3:]:
+                if re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', file) is None:
+                        print(f"grip-rm: error: invalid filename '{file}'", file=sys.stderr)
+                        sys.exit(1)
+elif sys.argv[1] == '--cached' or sys.argv[1] == '--force':
+        file_start = 2
+        if sys.argv[1] == '--cached':
+                option = sys.argv[1]
+                override = False
+        else:
+                option = None
+                override = True
+        for file in sys.argv[2:]:
+                if re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', file) is None:
+                        print(f"grip-rm: error: invalid filename '{file}'", file=sys.stderr)
+                        sys.exit(1)
+
+# Get the current branch
+with open('.grip/HEAD', 'r') as head:
+        branch_path = head.read().strip()
+
+# Get the latest commit of that branch
+with open(f'{branch_path}/ref', 'r') as ref:
+        latest_commit_path = ref.read().strip()
+
+# To keep track of files to remove
+files_to_remove = []
+
+# Get the files in the index, cwd, and repo
+index_files = os.listdir('.grip/INDEX')
+cwd_files = os.listdir('.')
+if latest_commit_path != '':
+        latest_commit_files = os.listdir(latest_commit_path)
+        
+
+for file in sys.argv[file_start:]:
+        if file in index_files and file in cwd_files:
+                # Get the same file from the index
+                file_in_index = index_files[index_files.index(file)]
+                file_in_index_path = os.path.join('.grip/INDEX', file_in_index)
+                if latest_commit_path == '' or file not in latest_commit_files:
+                        # If file is uncommitted, check if it is the same as index
+                        # Throw error if it is not
+                        if helpers.diff(file, file_in_index_path) is False:
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        print(f"grip-rm: error: '{file}' in index is different to both the working file and the repository")
+                                        sys.exit(1)
+                        else:
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        if option == '--cached':
+                                                files_to_remove.append(file)
+                                        else:
+                                                print(f"grip-rm: error: '{file}' has staged changes in the index")
+                                                sys.exit(1)
+                elif file in latest_commit_files:
+                        # If file was previously committed
+                        # Check for a new version
+                        # Throw error if new version will be lost
+                        file_in_repo = latest_commit_files[latest_commit_files.index(file)]
+                        file_in_repo_path = os.path.join(latest_commit_path, file_in_repo)
+                        if helpers.diff(file, file_in_index_path) and helpers.diff(file, file_in_repo_path) is False:
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        if option == '--cached':
+                                                files_to_remove.append(file)
+                                        else:
+                                                print(f"grip-rm: error: '{file}' has staged changes in the index")
+                                                sys.exit(1)
+                        elif helpers.diff(file, file_in_index_path) is False and helpers.diff(file_in_index_path, file_in_repo_path):
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        if option == '--cached':
+                                                files_to_remove.append(file)
+                                        else:
+                                                print(f"grip-rm: error: '{file}' in the repository is different to the working file")
+                                                sys.exit(1)
+                        elif helpers.diff(file, file_in_repo_path) and helpers.diff(file, file_in_index_path) is False:
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        print(f"grip-rm: error: '{file}' in index is different to both the working file and the repository")
+                                        sys.exit(1)
+                        elif helpers.diff(file, file_in_index_path) is False and helpers.diff(file_in_index_path, file_in_repo_path) is False:
+                                if override == True:
+                                        files_to_remove.append(file)
+                                else:
+                                        print(f"grip-rm: error: '{file}' in index is different to both the working file and the repository")
+                                        sys.exit(1)
+                        else:
+                                files_to_remove.append(file)
+        elif file in index_files and file not in cwd_files:
+                files_to_remove.append(file)
+        else:
+                # Nothing can override this since there is nothing to remove
+                print(f"grip-rm: error: '{file}' is not in the grip repository")
+                sys.exit(1)    
+
+# Remove files from the files collected for removal          
+for file in files_to_remove:
+        file_in_index_path = os.path.join('.grip/INDEX', file)
+        if option == '--cached':
+                os.remove(file_in_index_path)
+        else:
+                os.remove(file_in_index_path)
+                os.remove(file)
+                

@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+import os
+import shutil
+import sys
+import re
+import helpers
+
+# The following helper functions are in this file instead of helpers.py
+# since they are not used by any other grip commands
+
+"""Helper function to check if an argument passed in is a regex pattern
+   Returns True if it is a regex, else False"""
+def is_regex_pattern(argument: str) -> bool:
+        regex_metacharacters = {'.', '*', '+', '?', '^', '$', '[', ']', '(', ')', '{', '}', '|', '\\'}
+        if any(char in regex_metacharacters for char in argument):
+                try:
+                        re.compile(argument)
+                        return True
+                except re.error:
+                        return False
+        return False
+
+"""Helper function to get the files with a regex pattern
+   Returns the names of the files matching the regex"""
+def find_files_matching_regex(directory: str, pattern: str) -> list:
+        regex = re.compile(pattern)
+        matching_files = []
+        for filename in os.listdir(directory):
+                if regex.match(filename):
+                        matching_files.append(filename)
+        return matching_files
+        
+if os.path.exists('.grip') is False:
+        print('grip-add: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+
+if len(sys.argv) < 2:
+        print(f"usage: grip-add <filenames>", file=sys.stderr)
+        sys.exit(1)
+
+files = []
+
+# Iterate over each argument
+for arg in sys.argv[1:]:
+        # If it is a regex, get the files matching that pattern
+        if is_regex_pattern(arg):
+               files.extend(find_files_matching_regex(os.getcwd(), arg))
+        # Else if it is a valid filename, add it to list of files
+        elif re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', arg):
+                files.append(arg)
+        else:
+                print(f"grip-add: error: invalid filename '{arg}'", file=sys.stderr)
+                sys.exit(1)
+
+# Checking if the files to be added exist
+for file in files:
+        # Maybe the file was staged for removal
+        # Check if it exists in the index
+        if os.path.exists(file) is False and os.path.exists(f'.grip/INDEX/{file}') is False:
+                print(f"grip-add: error: can not open '{file}'", file=sys.stderr)
+                sys.exit(1)
+
+for file in files:
+        # If the index is empty, add all files given
+        if len(os.listdir('.grip/INDEX')) == 0:
+                shutil.copy(file, '.grip/INDEX/')
+        else:
+                if os.path.exists(f'.grip/INDEX/{file}'):
+                        # If the file exists in the index but not in the working direcory
+                        # remove it from the index to stage for removal
+                        if os.path.exists(file) is False:
+                                os.remove(f'.grip/INDEX/{file}')
+                        # Else check if the file being added has been changed at all
+                        elif helpers.diff(file, f'.grip/INDEX/{file}') is False:
+                                shutil.copy(file, f'.grip/INDEX/{file}')
+                else:
+                        shutil.copy(file, f'.grip/INDEX/')

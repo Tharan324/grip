@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+
+import os
+import shutil
+import sys
+
+if len(sys.argv) != 1:
+        print('usage: grip-init', file=sys.stderr)
+        sys.exit(1)
+
+# check if .grip exists
+if os.path.isdir('.grip'):
+        print('grip-init: error: .grip already exists', file=sys.stderr)
+        sys.exit(1)
+
+try:
+        os.mkdir('.grip')
+        os.mkdir('.grip/commits')
+        os.mkdir('.grip/branches')
+        os.mkdir('.grip/branches/trunk')
+
+        with open('.grip/branches/trunk/ref', 'w') as ref:
+                pass
+
+        os.mkdir('.grip/INDEX')
+
+        with open('.grip/HEAD', 'w') as head:
+                head.write('.grip/branches/trunk\n')
+
+        print('Initialized empty grip repository in .grip')
+
+except Exception as e:
+        if os.path.isdir('.grip'):
+                shutil.rmtree('.grip')
+        print('grip-init: error: something went wrong while creating .grip', file=sys.stderr)
+        sys.exit(1)

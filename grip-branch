@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+import os
+import shutil
+import sys
+import re
+
+if os.path.exists('.grip') is False:
+        print('grip-branch: error: grip repository directory .grip not found', file=sys.stderr)
+        sys.exit(1)
+
+# Get the path of the current branch path from HEAD
+with open('.grip/HEAD', 'r') as head:
+        current_branch_path = head.read().strip()
+# Get the path of the latest commit in this branch
+with open(f'{current_branch_path}/ref', 'r') as ref:
+        latest_commit_path = ref.read().strip()
+
+if len(os.listdir('.grip/commits')) == 0:
+        print("grip-branch: error: this command can not be run until after the first commit", file=sys.stderr)
+        sys.exit(1)
+
+# Listing branches
+if len(sys.argv) == 1:
+        branches = os.listdir('.grip/branches')
+        for branch in sorted(branches):
+                print(branch)
+        sys.exit(0)
+# If there are 2 arguments and second is a branchname, create branch
+elif len(sys.argv) == 2:
+        if sys.argv[1] == '-d':
+                print('grip-branch: error: branch name required', file=sys.stderr)
+                sys.exit(1)
+        elif re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', sys.argv[1]):
+                branches = os.listdir('.grip/branches')
+                if sys.argv[1] in branches:
+                        print(f"grip-branch: error: branch '{sys.argv[1]}' already exists", file=sys.stderr)
+                        exit(1)
+                os.mkdir(f'.grip/branches/{sys.argv[1]}')
+                with open(f'.grip/branches/{sys.argv[1]}/ref', 'w') as ref:
+                        # Write the latest commit of creator branch to new branch
+                        ref.write(latest_commit_path)
+                
+                sys.exit(0)
+        else:
+                print(f"grip-branch: error: invalid branch name '{sys.argv[1]}'", file=sys.stderr)
+                sys.exit(1)
+# If there are 3 arguments
+# Check if it follows grip-branch -d <branch>
+elif len(sys.argv) == 3:
+        if sys.argv[1] != '-d':
+                print('usage: grip-branch [-d] <branch>', file=sys.stderr)
+                sys.exit(1)
+        elif re.search('^[a-zA-Z0-9]+[a-zA-Z0-9._-]*$', sys.argv[2]) is None:
+                print(f"grip-branch: error: invalid branch name '{sys.argv[2]}'", file=sys.stderr)
+                sys.exit(1)
+
+branch_name = sys.argv[2]
+if branch_name == 'trunk':
+        print("grip-branch: error: can not delete branch 'trunk': default branch", file=sys.stderr)
+        sys.exit(1)
+branch_path = os.path.join('.grip/branches', branch_name)
+if os.path.exists(branch_path) is False:
+        print(f"grip-branch: error: branch '{branch_name}' doesn't exist", file=sys.stderr)
+        sys.exit(1)
+
+# If branch to delete is the current branch, exit
+if current_branch_path == branch_path:
+        print(f"grip-branch: error: can not delete branch '{branch_name}': current branch", file=sys.stderr)
+        sys.exit(1)
+
+# Check if the latest commit of the target branch (branch to be deleted)
+# is in the history of the source branch (branch we are deleting from)
+# If it isn't then 
+        # grip-branch: error: branch 'new' has unmerged changes
+
+# Get the latest commit of the branch target branch
+with open(f'{branch_path}/ref', 'r') as ref:
+        branch_latest_commit_path = ref.read().strip()
+        
+branch_latest_commit_number = int(os.path.basename(branch_latest_commit_path))
+
+if branch_latest_commit_number == 0:
+        shutil.rmtree(branch_path)
+        print(f"Deleted branch '{branch_name}'")
+else:
+        # Iterate through history of source branch
+        current_commit_path = latest_commit_path
+        while os.path.exists(os.path.join(current_commit_path, 'PARENT')):
+                if os.path.samefile(current_commit_path, branch_latest_commit_path):
+                        shutil.rmtree(branch_path)
+                        print(f"Deleted branch '{branch_name}'")
+                        sys.exit(0)
+                with open(f'{current_commit_path}/PARENT', 'r') as parent:
+                        current_commit_path = parent.read().strip()
+        # Latest commit of target branch was not found in history of source branch
+        print(f"grip-branch: error: branch '{branch_name}' has unmerged changes")
+        sys.exit(1)
